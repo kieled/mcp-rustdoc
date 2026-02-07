@@ -1,20 +1,25 @@
 # mcp-rustdoc
 
-An MCP server that gives AI assistants deep access to the Rust ecosystem. It scrapes docs.rs (and `doc.rust-lang.org` for `std`/`core`/`alloc`) with surgical DOM extraction (cheerio) and queries the crates.io API, exposing nine tools that cover everything from high-level crate overviews to individual method signatures, feature gates, trait impls, and code examples. Responses are cached in memory (5-minute TTL) to avoid redundant fetches.
+An MCP server that gives AI assistants deep access to the Rust ecosystem. It scrapes docs.rs (and `doc.rust-lang.org` for `std`/`core`/`alloc`) with surgical DOM extraction (cheerio) and queries the crates.io API, exposing twelve tools that cover everything from high-level crate overviews to individual method signatures, feature gates, trait impls, code examples, changelogs, and source code.
+
+Zero external HTTP dependencies — uses native `fetch` (Node.js >= 20). Responses are cached with LRU eviction (500 entries, 5-minute TTL, stale-while-revalidate) and all HTTP calls retry on transient failures.
 
 ## Tools
 
 | Tool | What it returns |
 |---|---|
-| `get_crate_metadata` | Version, features, default features, optional/required deps, links (crates.io API) |
+| `get_crate_metadata` | Version, features, deps, MSRV, links (crates.io API) |
 | `get_crate_brief` | One-shot bundle: metadata + overview + re-exports + module list + focused module items |
 | `lookup_crate_docs` | Crate overview documentation, version, sections, re-exports |
-| `get_crate_items` | Items in a module with types, feature gates, and descriptions |
-| `lookup_crate_item` | Item detail: signature, docs, methods, variants, optionally trait impls + examples |
+| `get_crate_items` | Items in a module with types, feature gates, and descriptions. Filterable by type and feature. |
+| `lookup_crate_item` | Item detail: signature, docs, methods, variants, trait impls, examples. Auto-discovers module path. |
 | `search_crate` | Ranked symbol search (exact > prefix > substring) with canonical paths |
 | `search_crates` | Search crates.io by keyword — returns name, description, downloads, version |
 | `get_crate_versions` | All published versions with dates and yanked status (crates.io API) |
 | `get_source_code` | Raw source code of a file from docs.rs or doc.rust-lang.org |
+| `batch_lookup` | Look up multiple items in one call (up to 20) — saves round-trips |
+| `get_crate_changelog` | Recent GitHub releases for a crate |
+| `resolve_type` | Resolve a full Rust type path (e.g. `tokio::sync::Mutex`) to its documentation |
 
 Every tool accepts an optional `version` parameter to pin a specific crate version instead of `latest`.
 
@@ -115,7 +120,7 @@ npx @modelcontextprotocol/inspector -- npx -y mcp-rustdoc
 ```bash
 git clone https://github.com/kieled/mcp-rustdoc.git
 cd mcp-rustdoc
-bun install
+npm install
 ```
 
 ### Run with bun (no build step)
@@ -127,21 +132,21 @@ bun run dev
 ### Build with Vite and run with Node.js
 
 ```bash
-bun run build     # vite build → dist/index.js (single bundled ESM file)
+npm run build     # vite build → dist/index.js (single bundled ESM file)
 node dist/index.js
 ```
 
 ### Build with tsc
 
 ```bash
-bun run build:tsc  # tsc → dist/ (one .js per source file)
+npm run build:tsc  # tsc → dist/ (one .js per source file)
 node dist/index.js
 ```
 
 ### Type check only
 
 ```bash
-bun run typecheck  # tsc --noEmit
+npm run typecheck  # tsc --noEmit
 ```
 
 ### Publish
@@ -163,32 +168,7 @@ Fetches structured metadata from the crates.io API.
 | `crateName` | string | yes | Crate name |
 | `version` | string | no | Pinned version |
 
-Returns: version, description, links (docs/repo/crates.io), license, download count, full feature list with activations, optional deps (feature-gated), required deps.
-
-```
-> get_crate_metadata({ crateName: "tokio" })
-
-# tokio v1.49.0
-
-An event-driven, non-blocking I/O platform for writing asynchronous applications...
-
-## Links
-  docs: https://docs.rs/tokio
-  repo: https://github.com/tokio-rs/tokio
-  license: MIT
-  downloads: 312,456,789
-
-## Features
-  default = [macros, rt-multi-thread]
-  fs = []
-  full = [fs, io-util, io-std, macros, net, ...]
-  io-util = [bytes]
-  ...
-
-## Optional Dependencies
-  bytes ^1 (feature-gated)
-  ...
-```
+Returns: version, description, links (docs/repo/crates.io), license, download count, MSRV, full feature list with activations, optional deps (feature-gated), required deps.
 
 ---
 
@@ -201,37 +181,6 @@ Single call to bootstrap context for a crate. Combines metadata, overview docs, 
 | `crateName` | string | yes | Crate name |
 | `version` | string | no | Pinned version |
 | `focusModules` | string | no | Comma-separated modules to expand (e.g. `"sync,task"`) |
-
-```
-> get_crate_brief({ crateName: "tokio", focusModules: "sync,task" })
-
-# tokio v1.49.0
-...
-## Features
-  default = [macros, rt-multi-thread]
-  all: bytes, fs, full, io-std, io-util, ...
-
-## Overview
-[truncated crate doc]
-
-## Re-exports
-  pub use task::spawn;
-  ...
-
-## Modules
-  fs  io  macros  net  runtime  signal  sync  task  time
-
-## Focus: tokio::sync
-  [struct] Barrier — ...
-  [struct] Mutex [sync] — ...
-  [struct] Notify [sync] — ...
-  ...
-
-## Focus: tokio::task
-  [fn] spawn — ...
-  [struct] JoinHandle — ...
-  ...
-```
 
 ---
 
@@ -250,78 +199,31 @@ Returns: crate version, overview documentation text, re-exports, and section lis
 
 ### `get_crate_items`
 
-Lists all public items in a crate root or specific module.
+Lists all public items in a crate root or specific module. Supports filtering by item type and feature gate.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `crateName` | string | yes | Crate name |
 | `modulePath` | string | no | Dot-separated path (e.g. `"sync"`, `"io.util"`) |
 | `itemType` | enum | no | Filter: `mod` `struct` `enum` `trait` `fn` `macro` `type` `constant` `static` `union` `attr` `derive` |
+| `feature` | string | no | Filter to items behind this feature gate (e.g. `"sync"`, `"fs"`) |
 | `version` | string | no | Pinned version |
-
-Each item includes its type, name, feature gate (if any), and short description.
-
-```
-> get_crate_items({ crateName: "tokio", modulePath: "sync", itemType: "struct" })
-
-# Items in tokio::sync [struct]
-  [struct] Barrier — ...
-  [struct] Mutex [feature: sync] — ...
-  [struct] Notify [feature: sync] — ...
-  [struct] OwnedMutexGuard [feature: sync] — ...
-  ...
-```
 
 ---
 
 ### `lookup_crate_item`
 
-Retrieves full documentation for a single item.
+Retrieves full documentation for a single item. Auto-discovers the module path if omitted by searching `all.html`. Falls back to fuzzy suggestions if the exact item is not found.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `crateName` | string | yes | Crate name |
 | `itemType` | enum | yes | Item type (see `get_crate_items`) |
 | `itemName` | string | yes | Item name (e.g. `"Mutex"`, `"spawn"`) |
-| `modulePath` | string | no | Dot-separated module path |
+| `modulePath` | string | no | Dot-separated module path. Auto-discovered if omitted. |
 | `version` | string | no | Pinned version |
 | `includeImpls` | boolean | no | Include trait implementation list |
 | `includeExamples` | boolean | no | Include code examples |
-
-Returns: feature gate (if any), type signature, documentation text, methods list, enum variants, required/provided trait methods. Optionally includes trait implementations and code examples.
-
-```
-> lookup_crate_item({
-    crateName: "tokio",
-    itemType: "struct",
-    itemName: "Mutex",
-    modulePath: "sync",
-    includeImpls: true
-  })
-
-# struct tokio::sync::Mutex
-> Available on crate feature `sync` only.
-
-## Signature
-pub struct Mutex<T: ?Sized> { ... }
-
-## Documentation
-An asynchronous Mutex...
-
-## Methods (12)
-  pub fn new(t: T) -> Mutex<T>
-  pub fn lock(&self) -> impl Future<Output = MutexGuard<'_, T>>
-  pub fn try_lock(&self) -> Result<MutexGuard<'_, T>, TryLockError>
-  ...
-
-## Trait Implementations (15)
-  impl<T: ?Sized + Debug> Debug for Mutex<T>
-  impl<T> Default for Mutex<T>
-  impl<T> From<T> for Mutex<T>
-  impl<T: ?Sized> Send for Mutex<T>
-  impl<T: ?Sized> Sync for Mutex<T>
-  ...
-```
 
 ---
 
@@ -335,19 +237,6 @@ Searches all items in a crate by name. Results are ranked: exact match on the ba
 | `query` | string | yes | Search query (case-insensitive) |
 | `version` | string | no | Pinned version |
 
-```
-> search_crate({ crateName: "tokio", query: "Mutex" })
-
-# "Mutex" in tokio — 6 matches
-
-[struct] tokio::sync::Mutex
-[struct] tokio::sync::MutexGuard
-[struct] tokio::sync::OwnedMutexGuard
-[struct] tokio::sync::MappedMutexGuard
-[enum] tokio::sync::TryLockError
-...
-```
-
 ---
 
 ### `search_crates`
@@ -360,17 +249,6 @@ Search for Rust crates on crates.io by keyword.
 | `page` | number | no | Page number (default 1) |
 | `perPage` | number | no | Results per page (default 10, max 50) |
 
-```
-> search_crates({ query: "http" })
-
-# Crate search: "http" — 1234 results (page 1)
-
-  http v1.2.0 (50,000,000 downloads) — A set of types for representing HTTP requests and responses.
-  hyper v1.5.2 (120,000,000 downloads) — A fast and correct HTTP library.
-  reqwest v0.12.12 (100,000,000 downloads) — higher level HTTP client library
-  ...
-```
-
 ---
 
 ### `get_crate_versions`
@@ -380,18 +258,6 @@ List all published versions of a crate from crates.io.
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `crateName` | string | yes | Crate name |
-
-```
-> get_crate_versions({ crateName: "serde" })
-
-# serde — 312 versions
-
-  1.0.219  2025-02-01
-  1.0.218  2025-01-12
-  1.0.217  2024-12-23
-  ...
-  0.1.0  2014-12-09
-```
 
 ---
 
@@ -405,17 +271,39 @@ Fetch the raw source code of a file from docs.rs (or doc.rust-lang.org for std c
 | `path` | string | yes | Source path relative to crate root (e.g. `"src/lib.rs"`, `"src/sync/mutex.rs"`) |
 | `version` | string | no | Pinned version |
 
-```
-> get_source_code({ crateName: "tokio", path: "src/sync/mutex.rs" })
+---
 
-# Source: tokio/src/sync/mutex.rs
-https://docs.rs/tokio/latest/src/tokio/sync/mutex.rs
+### `batch_lookup`
 
-\`\`\`rust
-use crate::sync::batch_semaphore as semaphore;
-...
-\`\`\`
-```
+Look up multiple items in a single call. Returns a compact summary (signature + short doc) for each item. Saves round-trips when you need several items at once.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `crateName` | string | yes | Crate name |
+| `items` | array | yes | Items to look up (max 20). Each: `{ itemType, itemName, modulePath? }` |
+| `version` | string | no | Pinned version |
+
+---
+
+### `get_crate_changelog`
+
+Fetch recent GitHub releases for a crate. Requires the crate to have a GitHub repository link on crates.io.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `crateName` | string | yes | Crate name |
+| `count` | number | no | Number of releases (default 5, max 20) |
+
+---
+
+### `resolve_type`
+
+Resolve a full Rust type path to its documentation. Parses the path to determine the crate, module, and item name automatically.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `typePath` | string | yes | Full Rust type path (e.g. `"tokio::sync::Mutex"`, `"std::collections::HashMap"`) |
+| `version` | string | no | Pinned version |
 
 ---
 
@@ -425,18 +313,23 @@ use crate::sync::batch_semaphore as semaphore;
 
 1. `get_crate_brief` with `focusModules` targeting the modules you care about
 2. `search_crate` to find specific types or functions
-3. `lookup_crate_item` for detailed signatures and docs
+3. `lookup_crate_item` for detailed signatures and docs (no need to specify `modulePath` — it auto-discovers)
 
 ### Understanding feature flags
 
-1. `get_crate_metadata` to see all features and their activations
-2. `get_crate_items` to see which items require which features
+1. `get_crate_metadata` to see all features, their activations, and MSRV
+2. `get_crate_items` with the `feature` parameter to see items behind a specific feature gate
 
 ### Finding the right type
 
 1. `search_crate` with a keyword
 2. `lookup_crate_item` with `includeImpls: true` to see what traits it implements
-3. `lookup_crate_item` on referenced types to chase cross-links
+3. `resolve_type` to chase cross-crate type paths (e.g. `tokio::sync::Mutex`)
+
+### Bulk lookups
+
+1. `batch_lookup` to fetch signatures and docs for multiple items in one call
+2. `get_crate_changelog` to see what changed in recent releases
 
 ---
 
@@ -444,11 +337,9 @@ use crate::sync::batch_semaphore as semaphore;
 
 ```
 src/
-  index.ts              Entry point — registers tools + prompt, starts stdio server
-  lib.ts                Shared: URL builders, HTTP/DOM helpers, crates.io API, extractors
-  cache.ts              In-memory TTL cache (5-minute default)
-  types/
-    html-to-text.d.ts   Type declarations for html-to-text
+  index.ts              Entry point — registers 12 tools + prompt, starts stdio server
+  lib.ts                HTTP (native fetch), URL builders, DOM helpers, crates.io API, extractors
+  cache.ts              LRU cache (500 entries, 5-min TTL, stale-while-revalidate)
   tools/
     shared.ts           Shared Zod schemas (itemTypeEnum, versionParam)
     lookup-docs.ts      lookup_crate_docs
@@ -460,6 +351,9 @@ src/
     source-code.ts      get_source_code
     crate-metadata.ts   get_crate_metadata
     crate-brief.ts      get_crate_brief
+    batch-lookup.ts     batch_lookup
+    crate-changelog.ts  get_crate_changelog
+    resolve-type.ts     resolve_type
 ```
 
 ### Data sources
@@ -467,14 +361,18 @@ src/
 - **docs.rs** — HTML pages parsed with cheerio for surgical DOM extraction (only the elements needed, not full-page conversion)
 - **doc.rust-lang.org** — Same rustdoc HTML format, used for `std`, `core`, and `alloc`
 - **crates.io API** — JSON endpoints for metadata, features, dependencies, and search
+- **GitHub API** — Release notes for changelogs (via repository link from crates.io)
 
 ### Design decisions
 
-- **cheerio over full-page text conversion** — Extracts only specific DOM elements (`.item-decl`, `.top-doc`, `.code-header`, `.stab.portability`) to minimize token usage
-- **Ranked search** — `all.html` contains every public item; scoring by exact/prefix/substring gives better results than flat substring matching
-- **Version parameter everywhere** — Agents working on projects with pinned dependencies need to read docs for specific versions
-- **Optional sections** — `includeImpls` and `includeExamples` default to off so the base response stays compact; agents opt in when they need more detail
-- **In-memory cache** — All HTTP responses are cached for 5 minutes, avoiding redundant fetches when agents issue multiple related tool calls
+- **Native fetch, zero HTTP deps** — Uses Node.js built-in `fetch` with `AbortController` timeouts. No axios, no node-fetch.
+- **cheerio for DOM extraction** — Extracts only specific DOM elements (`.item-decl`, `.top-doc`, `.code-header`, `.stab.portability`) to minimize token usage. Also powers `cleanHtml()` as a replacement for `html-to-text`.
+- **LRU cache with stale-while-revalidate** — 500-entry cap with LRU eviction. Stale entries (past 5-min TTL but within 15-min grace) are served immediately while a background refresh runs.
+- **Retry with backoff** — Transient 5xx errors are retried up to 2 times with exponential backoff.
+- **Ranked search** — `all.html` contains every public item; scoring by exact/prefix/substring gives better results than flat substring matching.
+- **Auto-discovery** — `lookup_crate_item` searches `all.html` to find the module path when not provided, and falls back to fuzzy suggestions when an exact match fails.
+- **Version parameter everywhere** — Agents working on projects with pinned dependencies can read docs for specific versions.
+- **Optional sections** — `includeImpls` and `includeExamples` default to off so the base response stays compact; agents opt in when they need more detail.
 
 ## License
 
