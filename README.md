@@ -1,6 +1,6 @@
 # mcp-rustdoc
 
-An MCP server that gives AI assistants deep access to the Rust ecosystem. It scrapes docs.rs (and `doc.rust-lang.org` for `std`/`core`/`alloc`) with surgical DOM extraction (cheerio) and queries the crates.io API, exposing seven tools that cover everything from high-level crate overviews to individual method signatures, feature gates, trait impls, and code examples. Responses are cached in memory (5-minute TTL) to avoid redundant fetches.
+An MCP server that gives AI assistants deep access to the Rust ecosystem. It scrapes docs.rs (and `doc.rust-lang.org` for `std`/`core`/`alloc`) with surgical DOM extraction (cheerio) and queries the crates.io API, exposing nine tools that cover everything from high-level crate overviews to individual method signatures, feature gates, trait impls, and code examples. Responses are cached in memory (5-minute TTL) to avoid redundant fetches.
 
 ## Tools
 
@@ -13,6 +13,8 @@ An MCP server that gives AI assistants deep access to the Rust ecosystem. It scr
 | `lookup_crate_item` | Item detail: signature, docs, methods, variants, optionally trait impls + examples |
 | `search_crate` | Ranked symbol search (exact > prefix > substring) with canonical paths |
 | `search_crates` | Search crates.io by keyword — returns name, description, downloads, version |
+| `get_crate_versions` | All published versions with dates and yanked status (crates.io API) |
+| `get_source_code` | Raw source code of a file from docs.rs or doc.rust-lang.org |
 
 Every tool accepts an optional `version` parameter to pin a specific crate version instead of `latest`.
 
@@ -371,6 +373,52 @@ Search for Rust crates on crates.io by keyword.
 
 ---
 
+### `get_crate_versions`
+
+List all published versions of a crate from crates.io.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `crateName` | string | yes | Crate name |
+
+```
+> get_crate_versions({ crateName: "serde" })
+
+# serde — 312 versions
+
+  1.0.219  2025-02-01
+  1.0.218  2025-01-12
+  1.0.217  2024-12-23
+  ...
+  0.1.0  2014-12-09
+```
+
+---
+
+### `get_source_code`
+
+Fetch the raw source code of a file from docs.rs (or doc.rust-lang.org for std crates).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `crateName` | string | yes | Crate name |
+| `path` | string | yes | Source path relative to crate root (e.g. `"src/lib.rs"`, `"src/sync/mutex.rs"`) |
+| `version` | string | no | Pinned version |
+
+```
+> get_source_code({ crateName: "tokio", path: "src/sync/mutex.rs" })
+
+# Source: tokio/src/sync/mutex.rs
+https://docs.rs/tokio/latest/src/tokio/sync/mutex.rs
+
+\`\`\`rust
+use crate::sync::batch_semaphore as semaphore;
+...
+\`\`\`
+```
+
+---
+
 ## Recommended workflows
 
 ### Exploring a new crate
@@ -408,6 +456,8 @@ src/
     lookup-item.ts      lookup_crate_item
     search.ts           search_crate
     search-crates.ts    search_crates
+    crate-versions.ts   get_crate_versions
+    source-code.ts      get_source_code
     crate-metadata.ts   get_crate_metadata
     crate-brief.ts      get_crate_brief
 ```

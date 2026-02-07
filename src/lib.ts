@@ -7,7 +7,7 @@ import { cacheGet, cacheSet } from './cache.js';
 
 export const DOCS_BASE = 'https://docs.rs';
 export const CRATES_IO = 'https://crates.io/api/v1';
-export const USER_AGENT = 'mcp-rust-docs/3.0.0';
+export const USER_AGENT = 'mcp-rust-docs/3.1.0';
 export const MAX_DOC_LENGTH = 6000;
 export const MAX_SEARCH_RESULTS = 100;
 
