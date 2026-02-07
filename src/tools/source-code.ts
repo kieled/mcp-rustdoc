@@ -17,9 +17,11 @@ export function register(server: McpServer) {
     },
     async ({ crateName, path, version }: { crateName: string; path: string; version?: string }) => {
       try {
+        // Strip leading "src/" — the URL templates already include /src/
+        const srcPath = path.replace(/^src\//, '');
+
         if (isStdCrate(crateName)) {
-          // std source is at doc.rust-lang.org/stable/src/{crate}/{path}
-          const url = `https://doc.rust-lang.org/stable/src/${crateName}/${path}`;
+          const url = `https://doc.rust-lang.org/stable/src/${crateName}/${srcPath}.html`;
           const $ = await fetchDom(url);
           const code = $('#source-code').text().trim() || $('pre.rust').text().trim();
           if (!code) return errorResult(`No source code found at ${url}`);
@@ -34,7 +36,7 @@ export function register(server: McpServer) {
         }
 
         const ver = version ?? 'latest';
-        const url = `${DOCS_BASE}/${crateName}/${ver}/src/${crateSlug(crateName)}/${path}`;
+        const url = `${DOCS_BASE}/${crateName}/${ver}/src/${crateSlug(crateName)}/${srcPath}.html`;
         const $ = await fetchDom(url);
 
         // docs.rs source pages have the code in #source-code or pre elements inside .rust-src
