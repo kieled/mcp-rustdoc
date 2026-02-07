@@ -14,7 +14,6 @@ export function register(server: McpServer) {
       crateName: z.string().describe('Crate name (e.g. "tokio", "serde-json")'),
       version: versionParam,
     },
-    // @ts-expect-error — MCP SDK deep type instantiation with Zod schemas
     async ({ crateName, version }: { crateName: string; version?: string }) => {
       try {
         const ver = version ?? 'latest';

@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
   fetchCrateInfo, fetchCrateVersionInfo, fetchCrateDeps,
-  textResult, errorResult,
+  textResult, errorResult, isStdCrate,
 } from '../lib.js';
 import { versionParam } from './shared.js';
 
@@ -16,6 +16,13 @@ export function register(server: McpServer) {
     },
     async ({ crateName, version }: { crateName: string; version?: string }) => {
       try {
+        if (isStdCrate(crateName)) {
+          return textResult(
+            `"${crateName}" is part of the Rust standard library and is not published on crates.io.\n` +
+            `Use lookup_crate_docs, get_crate_items, lookup_crate_item, or search_crate to browse its documentation.`
+          );
+        }
+
         const info = await fetchCrateInfo(crateName);
         const ver = version ?? info.version;
         const [versionInfo, deps] = await Promise.all([

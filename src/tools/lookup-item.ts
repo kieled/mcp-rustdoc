@@ -31,7 +31,6 @@ export function register(server: McpServer) {
         .optional()
         .describe('Include trait implementation list. Default: false.'),
     },
-    // @ts-expect-error — MCP SDK deep type instantiation with Zod schemas
     async ({ crateName, itemType, itemName, modulePath, version, includeExamples, includeImpls }: {
       crateName: string; itemType: string; itemName: string;
       modulePath?: string; version?: string;

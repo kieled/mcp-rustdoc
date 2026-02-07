@@ -1,12 +1,13 @@
 import axios from 'axios';
 import { load, type CheerioAPI } from 'cheerio';
 import { convert as htmlToText } from 'html-to-text';
+import { cacheGet, cacheSet } from './cache.js';
 
 // ─── Constants ───────────────────────────────────────────
 
 export const DOCS_BASE = 'https://docs.rs';
 export const CRATES_IO = 'https://crates.io/api/v1';
-export const USER_AGENT = 'mcp-rust-docs/2.0.0';
+export const USER_AGENT = 'mcp-rust-docs/3.0.0';
 export const MAX_DOC_LENGTH = 6000;
 export const MAX_SEARCH_RESULTS = 100;
 
@@ -27,6 +28,18 @@ export const TYPE_FILE_PREFIX: Record<string, string> = {
   union: 'union.', attr: 'attr.', derive: 'derive.',
 };
 
+// ─── Standard library crates ─────────────────────────────
+
+export const STD_CRATES = new Set(['std', 'core', 'alloc']);
+
+export function isStdCrate(name: string): boolean {
+  return STD_CRATES.has(name);
+}
+
+function stdDocsUrl(crate: string, path: string): string {
+  return `https://doc.rust-lang.org/stable/${crate}/${path}`;
+}
+
 // ─── URL helpers ─────────────────────────────────────────
 
 export function crateSlug(name: string): string {
@@ -34,6 +47,7 @@ export function crateSlug(name: string): string {
 }
 
 export function docsUrl(crate: string, path = 'index.html', version = 'latest'): string {
+  if (isStdCrate(crate)) return stdDocsUrl(crate, path);
   return `${DOCS_BASE}/${crate}/${version}/${crateSlug(crate)}/${path}`;
 }
 
@@ -48,7 +62,13 @@ export function modToRustPrefix(modulePath?: string): string {
 // ─── HTTP / DOM helpers ──────────────────────────────────
 
 export async function fetchDom(url: string): Promise<CheerioAPI> {
+  const cached = cacheGet<string>(`dom:${url}`);
+  if (cached) {
+    console.log(`[cache hit] ${url}`);
+    return load(cached);
+  }
   const { data } = await axios.get<string>(url, { timeout: 15_000 });
+  cacheSet(`dom:${url}`, data);
   return load(data);
 }
 
@@ -108,12 +128,16 @@ export interface CrateDep {
 const cratesIoHeaders = { 'User-Agent': USER_AGENT };
 
 export async function fetchCrateInfo(name: string): Promise<CrateInfo> {
+  const cacheKey = `crate-info:${name}`;
+  const cached = cacheGet<CrateInfo>(cacheKey);
+  if (cached) { console.log(`[cache hit] crate-info ${name}`); return cached; }
+
   const { data } = await axios.get(`${CRATES_IO}/crates/${name}`, {
     headers: cratesIoHeaders,
     timeout: 10_000,
   });
   const c = data.crate;
-  return {
+  const info: CrateInfo = {
     name: c.name,
     version: c.max_stable_version || c.max_version,
     description: c.description,
@@ -121,36 +145,50 @@ export async function fetchCrateInfo(name: string): Promise<CrateInfo> {
     repository: c.repository,
     downloads: c.downloads,
   };
+  cacheSet(cacheKey, info);
+  return info;
 }
 
 export async function fetchCrateVersionInfo(name: string, version: string): Promise<CrateVersionInfo> {
+  const cacheKey = `crate-version:${name}@${version}`;
+  const cached = cacheGet<CrateVersionInfo>(cacheKey);
+  if (cached) { console.log(`[cache hit] crate-version ${name}@${version}`); return cached; }
+
   const { data } = await axios.get(`${CRATES_IO}/crates/${name}/${version}`, {
     headers: cratesIoHeaders,
     timeout: 10_000,
   });
   const v = data.version;
   const features: Record<string, string[]> = v.features ?? {};
-  return {
+  const info: CrateVersionInfo = {
     num: v.num,
     features,
     defaultFeatures: features['default'] ?? [],
     yanked: v.yanked,
     license: v.license,
   };
+  cacheSet(cacheKey, info);
+  return info;
 }
 
 export async function fetchCrateDeps(name: string, version: string): Promise<CrateDep[]> {
+  const cacheKey = `crate-deps:${name}@${version}`;
+  const cached = cacheGet<CrateDep[]>(cacheKey);
+  if (cached) { console.log(`[cache hit] crate-deps ${name}@${version}`); return cached; }
+
   const { data } = await axios.get(`${CRATES_IO}/crates/${name}/${version}/dependencies`, {
     headers: cratesIoHeaders,
     timeout: 10_000,
   });
-  return (data.dependencies ?? []).map((d: Record<string, unknown>) => ({
+  const deps: CrateDep[] = (data.dependencies ?? []).map((d: Record<string, unknown>) => ({
     name: d.crate_id as string,
     req: d.req as string,
     optional: d.optional as boolean,
     kind: d.kind as string,
     features: (d.features as string[]) ?? [],
   }));
+  cacheSet(cacheKey, deps);
+  return deps;
 }
 
 // ─── DOM extraction helpers ──────────────────────────────

@@ -1,6 +1,6 @@
 # mcp-rustdoc
 
-An MCP server that gives AI assistants deep access to the Rust ecosystem. It scrapes docs.rs with surgical DOM extraction (cheerio) and queries the crates.io API, exposing six tools that cover everything from high-level crate overviews to individual method signatures, feature gates, trait impls, and code examples.
+An MCP server that gives AI assistants deep access to the Rust ecosystem. It scrapes docs.rs (and `doc.rust-lang.org` for `std`/`core`/`alloc`) with surgical DOM extraction (cheerio) and queries the crates.io API, exposing seven tools that cover everything from high-level crate overviews to individual method signatures, feature gates, trait impls, and code examples. Responses are cached in memory (5-minute TTL) to avoid redundant fetches.
 
 ## Tools
 
@@ -12,8 +12,21 @@ An MCP server that gives AI assistants deep access to the Rust ecosystem. It scr
 | `get_crate_items` | Items in a module with types, feature gates, and descriptions |
 | `lookup_crate_item` | Item detail: signature, docs, methods, variants, optionally trait impls + examples |
 | `search_crate` | Ranked symbol search (exact > prefix > substring) with canonical paths |
+| `search_crates` | Search crates.io by keyword — returns name, description, downloads, version |
 
 Every tool accepts an optional `version` parameter to pin a specific crate version instead of `latest`.
+
+### Standard library support
+
+All documentation tools work with `std`, `core`, and `alloc` — the Rust standard library crates hosted at `doc.rust-lang.org`. Use them exactly like any other crate:
+
+```
+> lookup_crate_docs({ crateName: "std" })
+> get_crate_items({ crateName: "std", modulePath: "collections" })
+> search_crate({ crateName: "core", query: "Option" })
+```
+
+`get_crate_metadata` returns a helpful message for std crates since they aren't published on crates.io.
 
 ## Install
 
@@ -335,6 +348,29 @@ Searches all items in a crate by name. Results are ranked: exact match on the ba
 
 ---
 
+### `search_crates`
+
+Search for Rust crates on crates.io by keyword.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `query` | string | yes | Search keywords |
+| `page` | number | no | Page number (default 1) |
+| `perPage` | number | no | Results per page (default 10, max 50) |
+
+```
+> search_crates({ query: "http" })
+
+# Crate search: "http" — 1234 results (page 1)
+
+  http v1.2.0 (50,000,000 downloads) — A set of types for representing HTTP requests and responses.
+  hyper v1.5.2 (120,000,000 downloads) — A fast and correct HTTP library.
+  reqwest v0.12.12 (100,000,000 downloads) — higher level HTTP client library
+  ...
+```
+
+---
+
 ## Recommended workflows
 
 ### Exploring a new crate
@@ -362,6 +398,7 @@ Searches all items in a crate by name. Results are ranked: exact match on the ba
 src/
   index.ts              Entry point — registers tools + prompt, starts stdio server
   lib.ts                Shared: URL builders, HTTP/DOM helpers, crates.io API, extractors
+  cache.ts              In-memory TTL cache (5-minute default)
   types/
     html-to-text.d.ts   Type declarations for html-to-text
   tools/
@@ -370,6 +407,7 @@ src/
     get-items.ts        get_crate_items
     lookup-item.ts      lookup_crate_item
     search.ts           search_crate
+    search-crates.ts    search_crates
     crate-metadata.ts   get_crate_metadata
     crate-brief.ts      get_crate_brief
 ```
@@ -377,7 +415,8 @@ src/
 ### Data sources
 
 - **docs.rs** — HTML pages parsed with cheerio for surgical DOM extraction (only the elements needed, not full-page conversion)
-- **crates.io API** — JSON endpoints for metadata, features, and dependencies
+- **doc.rust-lang.org** — Same rustdoc HTML format, used for `std`, `core`, and `alloc`
+- **crates.io API** — JSON endpoints for metadata, features, dependencies, and search
 
 ### Design decisions
 
@@ -385,6 +424,7 @@ src/
 - **Ranked search** — `all.html` contains every public item; scoring by exact/prefix/substring gives better results than flat substring matching
 - **Version parameter everywhere** — Agents working on projects with pinned dependencies need to read docs for specific versions
 - **Optional sections** — `includeImpls` and `includeExamples` default to off so the base response stays compact; agents opt in when they need more detail
+- **In-memory cache** — All HTTP responses are cached for 5 minutes, avoiding redundant fetches when agents issue multiple related tool calls
 
 ## License
 

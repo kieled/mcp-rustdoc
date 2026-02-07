@@ -8,13 +8,14 @@ import { register as lookupItem } from './tools/lookup-item.js';
 import { register as search } from './tools/search.js';
 import { register as crateMetadata } from './tools/crate-metadata.js';
 import { register as crateBrief } from './tools/crate-brief.js';
+import { register as searchCrates } from './tools/search-crates.js';
 
 // Keep stdout clean for MCP protocol — redirect console.log to stderr
 console.log = (...args: unknown[]) => console.error(...args);
 
 // ─── Server ──────────────────────────────────────────────
 
-const server = new McpServer({ name: 'rust-docs', version: '2.0.0' });
+const server = new McpServer({ name: 'rust-docs', version: '3.0.0' });
 
 // Register tools
 lookupDocs(server);
@@ -23,6 +24,7 @@ lookupItem(server);
 search(server);
 crateMetadata(server);
 crateBrief(server);
+searchCrates(server);
 
 // ─── Prompt ──────────────────────────────────────────────
 

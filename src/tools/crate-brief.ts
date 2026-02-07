@@ -3,7 +3,8 @@ import { z } from 'zod';
 import {
   docsUrl, fetchDom, fetchCrateInfo, fetchCrateVersionInfo,
   cleanHtml, truncate, modToUrlPrefix, extractReExports,
-  textResult, errorResult, SECTION_TO_TYPE,
+  textResult, errorResult, SECTION_TO_TYPE, isStdCrate,
+  type CrateInfo, type CrateVersionInfo,
 } from '../lib.js';
 import { versionParam } from './shared.js';
 
@@ -23,12 +24,22 @@ export function register(server: McpServer) {
       crateName: string; version?: string; focusModules?: string;
     }) => {
       try {
-        // 1. Metadata from crates.io
-        const info = await fetchCrateInfo(crateName);
-        const ver = version ?? info.version;
-        const versionInfo = await fetchCrateVersionInfo(crateName, ver);
+        const isStd = isStdCrate(crateName);
 
-        // 2. Docs from docs.rs crate root
+        // 1. Metadata from crates.io (skip for std crates)
+        let info: CrateInfo | null = null;
+        let versionInfo: CrateVersionInfo | null = null;
+
+        if (!isStd) {
+          const crateInfo = await fetchCrateInfo(crateName);
+          const ver = version ?? crateInfo.version;
+          versionInfo = await fetchCrateVersionInfo(crateName, ver);
+          info = crateInfo;
+        }
+
+        const ver = isStd ? 'latest' : (version ?? info!.version);
+
+        // 2. Docs from rustdoc (docs.rs or doc.rust-lang.org)
         const rootUrl = docsUrl(crateName, 'index.html', ver);
         const $ = await fetchDom(rootUrl);
 
@@ -54,25 +65,37 @@ export function register(server: McpServer) {
 
         // ── Assemble output ──
 
-        const parts: string[] = [
-          `# ${info.name} v${versionInfo.num}`,
-          rootUrl,
-          '',
-          info.description,
-          '',
-          `license: ${versionInfo.license} | downloads: ${info.downloads.toLocaleString()}`,
-        ];
+        const parts: string[] = [];
 
-        if (info.repository) parts.push(`repo: ${info.repository}`);
+        if (isStd) {
+          const pageVersion = $('.sidebar-crate .version').text().trim() || 'stable';
+          parts.push(
+            `# ${crateName} (Rust standard library) v${pageVersion}`,
+            rootUrl,
+            '',
+            `The "${crateName}" crate is part of the Rust standard library.`,
+          );
+        } else {
+          parts.push(
+            `# ${info!.name} v${versionInfo!.num}`,
+            rootUrl,
+            '',
+            info!.description,
+            '',
+            `license: ${versionInfo!.license} | downloads: ${info!.downloads.toLocaleString()}`,
+          );
 
-        // Features summary
-        const { defaultFeatures, features } = versionInfo;
-        parts.push(
-          '',
-          '## Features',
-          `  default = [${defaultFeatures.join(', ')}]`,
-          `  all: ${Object.keys(features).filter((f) => f !== 'default').sort().join(', ')}`,
-        );
+          if (info!.repository) parts.push(`repo: ${info!.repository}`);
+
+          // Features summary
+          const { defaultFeatures, features } = versionInfo!;
+          parts.push(
+            '',
+            '## Features',
+            `  default = [${defaultFeatures.join(', ')}]`,
+            `  all: ${Object.keys(features).filter((f) => f !== 'default').sort().join(', ')}`,
+          );
+        }
 
         // Overview
         if (doc) parts.push('', '## Overview', doc);
