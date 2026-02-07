@@ -5,7 +5,7 @@ import { cacheGet, cacheSet, cacheIsStale } from './cache.js';
 
 export const DOCS_BASE = 'https://docs.rs';
 export const CRATES_IO = 'https://crates.io/api/v1';
-export const USER_AGENT = 'mcp-rust-docs/4.0.0';
+export const USER_AGENT = 'mcp-rust-docs/5.0.0';
 export const MAX_DOC_LENGTH = 6000;
 export const MAX_SEARCH_RESULTS = 100;
 
@@ -138,14 +138,45 @@ export function cleanHtml(html: string): string {
   const $ = load(`<body>${html}</body>`);
   $('img').remove();
   $('summary.hideme').remove();
-  $('p, div, br, h1, h2, h3, h4, h5, h6, li, tr').each((_, el) => {
-    $(el).before('\n');
+
+  // Preserve code blocks as markdown fenced blocks
+  $('div.example-wrap').each((_, wrap) => {
+    const code = $(wrap).find('pre').text().trim();
+    if (code) $(wrap).replaceWith(`\n\`\`\`rust\n${code}\n\`\`\`\n`);
   });
+  $('pre.rust').each((_, el) => {
+    const code = $(el).text().trim();
+    if (code) $(el).replaceWith(`\n\`\`\`rust\n${code}\n\`\`\`\n`);
+  });
+  $('pre').each((_, el) => {
+    const code = $(el).text().trim();
+    if (code) $(el).replaceWith(`\n\`\`\`\n${code}\n\`\`\`\n`);
+  });
+
+  // Inline code as backticks
+  $('code').each((_, el) => {
+    const t = $(el).text();
+    if (t && !t.includes('\n')) { $(el).replaceWith(`\`${t}\``); }
+  });
+
+  // Headings
+  $('h1').each((_, el) => { $(el).replaceWith(`\n# ${$(el).text().trim()}\n`); });
+  $('h2').each((_, el) => { $(el).replaceWith(`\n## ${$(el).text().trim()}\n`); });
+  $('h3').each((_, el) => { $(el).replaceWith(`\n### ${$(el).text().trim()}\n`); });
+  $('h4,h5,h6').each((_, el) => { $(el).replaceWith(`\n#### ${$(el).text().trim()}\n`); });
+
+  // Block elements
+  $('p, div, br, li, tr').each((_, el) => { $(el).before('\n'); });
+
   return $('body').text().replace(/\n{3,}/g, '\n\n').trim();
 }
 
 export function truncate(text: string, max: number): string {
-  return text.length > max ? text.slice(0, max) + '\n\n[…truncated]' : text;
+  if (text.length <= max) return text;
+  const sliced = text.slice(0, max);
+  const fences = sliced.match(/```/g);
+  const unclosed = fences && fences.length % 2 !== 0;
+  return sliced + (unclosed ? '\n```' : '') + '\n\n[…truncated]';
 }
 
 // ─── MCP result helpers ──────────────────────────────────
@@ -346,4 +377,71 @@ export function extractReExports($: CheerioAPI): string[] {
     reexports.push($(el).text().trim());
   });
   return reexports;
+}
+
+// ─── Method extraction ──────────────────────────────────
+
+export interface MethodInfo {
+  name: string;
+  signature: string;
+  deprecated: boolean;
+  featureGate: string | null;
+  shortDoc: string;
+}
+
+export function extractMethods($: CheerioAPI): MethodInfo[] {
+  const methods: MethodInfo[] = [];
+  const seen = new Set<string>();
+
+  $('section[id^="method."], section[id^="tymethod."]').each((_, el) => {
+    const $el = $(el);
+    const id = $el.attr('id') ?? '';
+    if (seen.has(id)) return;
+    seen.add(id);
+
+    const name = id.replace(/^(ty)?method\./, '');
+    const signature = $el.find('h4.code-header').first().text().trim();
+    const deprecated = $el.find('.stab.deprecated').length > 0
+      || $el.parent('details').find('.stab.deprecated').length > 0;
+    const featureGate = $el.find('.stab.portability code').first().text().trim() || null;
+    const shortDoc = $el.parent('details').find('.docblock p').first().text().trim()
+      || $el.next('.docblock').find('p').first().text().trim();
+
+    if (name && signature) {
+      methods.push({ name, signature, deprecated, featureGate, shortDoc });
+    }
+  });
+
+  return methods;
+}
+
+// ─── Deprecation / stability extraction ─────────────────
+
+export function extractDeprecation($: CheerioAPI): string | null {
+  const dep = $('.item-info .stab.deprecated').first().text().trim();
+  return dep || null;
+}
+
+export function extractStability($: CheerioAPI): string | null {
+  const unstable = $('.item-info .stab.unstable').first().text().trim();
+  return unstable || null;
+}
+
+// ─── Levenshtein distance ───────────────────────────────
+
+export function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const dp: number[] = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    let prev = i - 1;
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[n];
 }

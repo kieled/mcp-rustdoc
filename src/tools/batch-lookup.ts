@@ -23,6 +23,7 @@ export function register(server: McpServer) {
       items: z.array(querySchema).min(1).max(20).describe('Items to look up (max 20)'),
       version: versionParam,
     },
+    { readOnlyHint: true },
     async ({ crateName, items, version }: {
       crateName: string;
       items: { itemType: string; itemName: string; modulePath?: string }[];
@@ -78,7 +79,12 @@ export function register(server: McpServer) {
           if (doc) parts.push(doc);
           parts.push('');
         } else {
-          parts.push(`## ${itemType} ${itemName}`, `  Error: ${r.reason?.message ?? 'unknown error'}`, '');
+          parts.push(
+            `## ${itemType} ${itemName}`,
+            `  Error: ${r.reason?.message ?? 'unknown error'}`,
+            `  Tip: verify with search_crate({ crateName: "${crateName}", query: "${itemName}" })`,
+            '',
+          );
         }
       }
 

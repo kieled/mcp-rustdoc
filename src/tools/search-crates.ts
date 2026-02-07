@@ -25,6 +25,7 @@ export function register(server: McpServer) {
       page: z.number().min(1).optional().describe('Page number (default 1)'),
       perPage: z.number().min(1).max(50).optional().describe('Results per page (default 10, max 50)'),
     },
+    { readOnlyHint: true },
     async ({ query, page: rawPage, perPage: rawPerPage }: { query: string; page?: number; perPage?: number }) => {
       const page = rawPage ?? 1;
       const perPage = rawPerPage ?? 10;
@@ -56,11 +57,16 @@ export function register(server: McpServer) {
           return `  ${c.name} v${ver} (${dl} downloads)${desc}`;
         });
 
+        const hasMore = page * perPage < total;
+        const pageHint = hasMore
+          ? `\n\n[Page ${page} of ${Math.ceil(total / perPage)}. Use page: ${page + 1} for more.]`
+          : '';
+
         const result = [
           `# Crate search: "${query}" — ${total} results (page ${page})`,
           '',
           ...lines,
-        ].join('\n');
+        ].join('\n') + pageHint;
 
         cacheSet(cacheKey, result);
         return textResult(result);

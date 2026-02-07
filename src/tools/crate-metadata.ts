@@ -14,6 +14,7 @@ export function register(server: McpServer) {
       crateName: z.string().describe('Crate name'),
       version: versionParam,
     },
+    { readOnlyHint: true },
     async ({ crateName, version }: { crateName: string; version?: string }) => {
       try {
         if (isStdCrate(crateName)) {
@@ -81,7 +82,10 @@ export function register(server: McpServer) {
 
         return textResult(parts.join('\n'));
       } catch (e: unknown) {
-        return errorResult(`Could not fetch metadata for "${crateName}". ${(e as Error).message}`);
+        return errorResult(
+          `Could not fetch metadata for "${crateName}". ${(e as Error).message}\n` +
+          `Tip: verify the crate exists with search_crates({ query: "${crateName}" }).`,
+        );
       }
     },
   );

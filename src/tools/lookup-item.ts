@@ -5,6 +5,7 @@ import {
   modToUrlPrefix, modToRustPrefix,
   textResult, errorResult, searchAllItems,
   extractItemFeatureGate, extractTraitImpls, extractExamples,
+  extractDeprecation, extractStability,
   TYPE_FILE_PREFIX, MAX_DOC_LENGTH,
 } from '../lib.js';
 import { itemTypeEnum, versionParam } from './shared.js';
@@ -31,6 +32,7 @@ export function register(server: McpServer) {
         .optional()
         .describe('Include trait implementation list. Default: false.'),
     },
+    { readOnlyHint: true },
     async ({ crateName, itemType, itemName, modulePath, version, includeExamples, includeImpls }: {
       crateName: string; itemType: string; itemName: string;
       modulePath?: string; version?: string;
@@ -97,10 +99,15 @@ export function register(server: McpServer) {
         // Feature gate
         const featureGate = extractItemFeatureGate($);
 
+        // Deprecation / stability
+        const deprecation = extractDeprecation($);
+        const stability = extractStability($);
+
         // Doc comment
+        const docLimit = MAX_DOC_LENGTH;
         const doc = truncate(
           cleanHtml($('details.toggle.top-doc').html() ?? ''),
-          MAX_DOC_LENGTH,
+          docLimit,
         );
 
         // Inherent methods (structs, enums)
@@ -138,6 +145,8 @@ export function register(server: McpServer) {
         // ── Assemble output ──
         const parts: string[] = [`# ${itemType} ${fullName}`, url, ''];
 
+        if (deprecation) parts.push(`> DEPRECATED: ${deprecation}`, '');
+        if (stability) parts.push(`> ${stability}`, '');
         if (featureGate) parts.push(`> ${featureGate}`, '');
         if (decl) parts.push('## Signature', '```rust', decl, '```', '');
         if (doc) parts.push('## Documentation', doc, '');
@@ -156,7 +165,12 @@ export function register(server: McpServer) {
             '',
           );
         if (methods.length)
-          parts.push(`## Methods (${methods.length})`, ...methods.map((m) => `  ${m}`), '');
+          parts.push(
+            `## Methods (${methods.length})`,
+            ...methods.map((m) => `  ${m}`),
+            '',
+            'Tip: use list_methods for full method details including deprecation and docs.',
+          );
 
         // Optional: trait implementations
         if (includeImpls) {
@@ -180,7 +194,8 @@ export function register(server: McpServer) {
         return textResult(parts.join('\n'));
       } catch (e: unknown) {
         return errorResult(
-          `Could not fetch ${itemType} "${itemName}". ${(e as Error).message}`,
+          `Could not fetch ${itemType} "${itemName}". ${(e as Error).message}\n` +
+          `Tip: verify the item with search_crate({ crateName: "${crateName}", query: "${itemName}" }).`,
         );
       }
     },

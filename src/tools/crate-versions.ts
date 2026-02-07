@@ -21,6 +21,7 @@ export function register(server: McpServer) {
     {
       crateName: z.string().describe('Crate name'),
     },
+    { readOnlyHint: true },
     async ({ crateName }: { crateName: string }) => {
       try {
         if (isStdCrate(crateName)) {
@@ -65,7 +66,10 @@ export function register(server: McpServer) {
         cacheSet(cacheKey, result);
         return textResult(result);
       } catch (e: unknown) {
-        return errorResult(`Could not fetch versions for "${crateName}". ${(e as Error).message}`);
+        return errorResult(
+          `Could not fetch versions for "${crateName}". ${(e as Error).message}\n` +
+          `Tip: verify the crate exists with search_crates({ query: "${crateName}" }).`,
+        );
       }
     },
   );

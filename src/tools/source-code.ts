@@ -15,6 +15,7 @@ export function register(server: McpServer) {
       path: z.string().describe('Source path relative to crate root (e.g. "src/lib.rs", "src/sync/mutex.rs")'),
       version: versionParam,
     },
+    { readOnlyHint: true },
     async ({ crateName, path, version }: { crateName: string; path: string; version?: string }) => {
       try {
         // Strip leading "src/" — the URL templates already include /src/
@@ -45,7 +46,10 @@ export function register(server: McpServer) {
           || $('.src-line-numbers + code').text().trim();
 
         if (!code) {
-          return errorResult(`No source code found at ${url}. Check that the path is correct.`);
+          return errorResult(
+            `No source code found at ${url}. Check that the path is correct.\n` +
+            `Tip: paths are relative to crate root. Common files: "src/lib.rs", "src/main.rs".`,
+          );
         }
 
         return textResult([
@@ -57,7 +61,10 @@ export function register(server: McpServer) {
           '```',
         ].join('\n'));
       } catch (e: unknown) {
-        return errorResult(`Could not fetch source for "${crateName}/${path}". ${(e as Error).message}`);
+        return errorResult(
+          `Could not fetch source for "${crateName}/${path}". ${(e as Error).message}\n` +
+          `Tip: paths are relative to crate root (e.g. "src/lib.rs"). Check the file exists in the crate.`,
+        );
       }
     },
   );

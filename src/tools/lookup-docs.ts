@@ -14,6 +14,7 @@ export function register(server: McpServer) {
       crateName: z.string().describe('Crate name (e.g. "tokio", "serde-json")'),
       version: versionParam,
     },
+    { readOnlyHint: true },
     async ({ crateName, version }: { crateName: string; version?: string }) => {
       try {
         const ver = version ?? 'latest';
@@ -45,7 +46,10 @@ export function register(server: McpServer) {
 
         return textResult(parts.join('\n'));
       } catch (e: unknown) {
-        return errorResult(`Could not fetch docs for "${crateName}". ${(e as Error).message}`);
+        return errorResult(
+          `Could not fetch docs for "${crateName}". ${(e as Error).message}\n` +
+          `Tip: check the crate name with search_crates({ query: "${crateName}" }).`,
+        );
       }
     },
   );

@@ -1,6 +1,6 @@
 {
   "name": "mcp-rustdoc",
-  "version": "4.0.2",
+  "version": "5.0.0",
   "type": "module",
   "description": "MCP server for fetching and browsing Rust crate documentation from docs.rs and crates.io",
   "main": "dist/index.js",

@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
   docsUrl, fetchDom, modToUrlPrefix,
-  textResult, errorResult, SECTION_TO_TYPE,
+  textResult, errorResult, SECTION_TO_TYPE, MAX_SEARCH_RESULTS,
 } from '../lib.js';
 import { itemTypeEnum, versionParam } from './shared.js';
 
@@ -25,6 +25,7 @@ export function register(server: McpServer) {
         .describe('Filter to items gated behind this feature (e.g. "sync", "fs")'),
       version: versionParam,
     },
+    { readOnlyHint: true },
     async ({ crateName, modulePath, itemType, feature, version }: {
       crateName: string; modulePath?: string; itemType?: string; feature?: string; version?: string;
     }) => {
@@ -70,11 +71,19 @@ export function register(server: McpServer) {
           return textResult(`No items found in ${label}${filterLabel}.`);
         }
 
+        const capped = lines.slice(0, MAX_SEARCH_RESULTS);
+        const overflow = lines.length > MAX_SEARCH_RESULTS
+          ? `\n\n[…${lines.length - MAX_SEARCH_RESULTS} more items. Narrow with itemType or feature filter.]`
+          : '';
+
         return textResult(
-          [`# Items in ${label}${filterLabel}`, url, '', ...lines].join('\n'),
+          [`# Items in ${label}${filterLabel} (${lines.length})`, url, '', ...capped].join('\n') + overflow,
         );
       } catch (e: unknown) {
-        return errorResult(`Could not list items. ${(e as Error).message}`);
+        return errorResult(
+          `Could not list items for "${crateName}". ${(e as Error).message}\n` +
+          `Tip: check the module path exists with lookup_crate_docs({ crateName: "${crateName}" }).`,
+        );
       }
     },
   );

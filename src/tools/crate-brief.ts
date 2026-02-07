@@ -20,6 +20,7 @@ export function register(server: McpServer) {
         .optional()
         .describe('Comma-separated module names to expand (e.g. "sync,task,io"). Omit for overview only.'),
     },
+    { readOnlyHint: true },
     async ({ crateName, version, focusModules }: {
       crateName: string; version?: string; focusModules?: string;
     }) => {
@@ -149,7 +150,10 @@ export function register(server: McpServer) {
 
         return textResult(parts.join('\n'));
       } catch (e: unknown) {
-        return errorResult(`Could not fetch brief for "${crateName}". ${(e as Error).message}`);
+        return errorResult(
+          `Could not fetch brief for "${crateName}". ${(e as Error).message}\n` +
+          `Tip: check the crate name with search_crates({ query: "${crateName}" }).`,
+        );
       }
     },
   );

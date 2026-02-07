@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   docsUrl, fetchDom, cleanHtml, truncate,
   searchAllItems, extractItemFeatureGate,
+  extractDeprecation, extractStability,
   textResult, errorResult,
   TYPE_FILE_PREFIX, isStdCrate,
 } from '../lib.js';
@@ -16,13 +17,15 @@ export function register(server: McpServer) {
       typePath: z.string().describe('Full Rust type path (e.g. "tokio::sync::Mutex", "std::collections::HashMap")'),
       version: versionParam,
     },
+    { readOnlyHint: true },
     async ({ typePath, version }: { typePath: string; version?: string }) => {
       try {
         // Parse the type path: crate::module::path::ItemName
         const segments = typePath.split('::').filter(Boolean);
         if (segments.length < 2) {
           return errorResult(
-            `Type path "${typePath}" must have at least a crate and item name (e.g. "serde::Serialize").`,
+            `Type path "${typePath}" must have at least a crate and item name (e.g. "serde::Serialize").\n` +
+            `Tip: use search_crate to find the full path of an item.`,
           );
         }
 
@@ -46,6 +49,8 @@ export function register(server: McpServer) {
           const parts = [`Could not resolve "${typePath}".`];
           if (suggestions.length) {
             parts.push('', 'Similar items found:', ...suggestions);
+          } else {
+            parts.push('', `Tip: verify the crate with search_crates({ query: "${crateName}" }).`);
           }
           return textResult(parts.join('\n'));
         }
@@ -65,6 +70,8 @@ export function register(server: McpServer) {
 
         const decl = $('pre.rust.item-decl').text().trim();
         const featureGate = extractItemFeatureGate($);
+        const deprecation = extractDeprecation($);
+        const stability = extractStability($);
         const doc = truncate(
           cleanHtml($('details.toggle.top-doc').html() ?? ''),
           2000,
@@ -72,13 +79,18 @@ export function register(server: McpServer) {
 
         const fullName = `${crateName}::${exactMatch.name}`;
         const parts: string[] = [`# ${exactMatch.type} ${fullName}`, url, ''];
+        if (deprecation) parts.push(`> DEPRECATED: ${deprecation}`, '');
+        if (stability) parts.push(`> ${stability}`, '');
         if (featureGate) parts.push(`> ${featureGate}`, '');
         if (decl) parts.push('```rust', decl, '```', '');
         if (doc) parts.push(doc);
 
         return textResult(parts.join('\n'));
       } catch (e: unknown) {
-        return errorResult(`Could not resolve "${typePath}". ${(e as Error).message}`);
+        return errorResult(
+          `Could not resolve "${typePath}". ${(e as Error).message}\n` +
+          `Tip: check that the crate exists and the path is correct.`,
+        );
       }
     },
   );

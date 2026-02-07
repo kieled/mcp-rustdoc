@@ -27,6 +27,7 @@ export function register(server: McpServer) {
       crateName: z.string().describe('Crate name'),
       count: z.number().min(1).max(20).optional().describe('Number of releases to fetch (default 5, max 20)'),
     },
+    { readOnlyHint: true },
     async ({ crateName, count: rawCount }: { crateName: string; count?: number }) => {
       const count = rawCount ?? 5;
       try {
@@ -46,7 +47,10 @@ export function register(server: McpServer) {
 
         const info = await fetchCrateInfo(crateName);
         if (!info.repository) {
-          return errorResult(`No repository link found for "${crateName}" on crates.io.`);
+          return errorResult(
+            `No repository link found for "${crateName}" on crates.io.\n` +
+            `Tip: check get_crate_metadata({ crateName: "${crateName}" }) to see available links.`,
+          );
         }
 
         const ownerRepo = extractGhOwnerRepo(info.repository);
@@ -78,7 +82,10 @@ export function register(server: McpServer) {
         cacheSet(cacheKey, result);
         return textResult(result);
       } catch (e: unknown) {
-        return errorResult(`Could not fetch changelog for "${crateName}". ${(e as Error).message}`);
+        return errorResult(
+          `Could not fetch changelog for "${crateName}". ${(e as Error).message}\n` +
+          `Tip: this requires a GitHub repository link on crates.io.`,
+        );
       }
     },
   );

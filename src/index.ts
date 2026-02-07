@@ -14,13 +14,34 @@ import { register as sourceCode } from './tools/source-code.js';
 import { register as batchLookup } from './tools/batch-lookup.js';
 import { register as crateChangelog } from './tools/crate-changelog.js';
 import { register as resolveType } from './tools/resolve-type.js';
+import { register as listMethods } from './tools/list-methods.js';
 
 // Keep stdout clean for MCP protocol — redirect console.log to stderr
 console.log = (...args: unknown[]) => console.error(...args);
 
 // ─── Server ──────────────────────────────────────────────
 
-const server = new McpServer({ name: 'rust-docs', version: '4.0.0' });
+const INSTRUCTIONS = [
+  'Rust documentation server for docs.rs, crates.io, and the standard library (std/core/alloc).',
+  '',
+  'Recommended workflow:',
+  '1. Discovery: search_crates to find crates, get_crate_brief for a quick overview',
+  '2. Navigation: get_crate_items to list module contents, search_crate to find items by name',
+  '3. Details: lookup_crate_item for full docs (use includeExamples/includeImpls for extras)',
+  '4. Methods: list_methods to see all methods on a struct/enum/trait',
+  '5. Shortcuts: resolve_type to go from a full path like "tokio::sync::Mutex" directly to docs',
+  '6. Batch: batch_lookup to fetch multiple items in one call',
+  '',
+  'Tips:',
+  '- modulePath uses dots not colons: "sync.mpsc" not "sync::mpsc"',
+  '- lookup_crate_item auto-discovers modulePath when omitted',
+  '- get_source_code paths are relative to crate root (e.g. "src/lib.rs")',
+].join('\n');
+
+const server = new McpServer(
+  { name: 'rust-docs', version: '5.0.0' },
+  { instructions: INSTRUCTIONS } as Record<string, unknown>,
+);
 
 // Register tools
 lookupDocs(server);
@@ -35,6 +56,7 @@ sourceCode(server);
 batchLookup(server);
 crateChangelog(server);
 resolveType(server);
+listMethods(server);
 
 // ─── Prompt ──────────────────────────────────────────────
 
