@@ -3,7 +3,7 @@ import { z } from 'zod';
 import {
   docsUrl, fetchDom, cleanHtml, truncate,
   modToUrlPrefix, modToRustPrefix,
-  textResult, errorResult,
+  textResult, errorResult, searchAllItems,
   extractItemFeatureGate, extractTraitImpls, extractExamples,
   TYPE_FILE_PREFIX, MAX_DOC_LENGTH,
 } from '../lib.js';
@@ -12,7 +12,7 @@ import { itemTypeEnum, versionParam } from './shared.js';
 export function register(server: McpServer) {
   server.tool(
     'lookup_crate_item',
-    'Get detailed documentation for a specific item. Returns signature, docs, feature gate, methods, trait impls, and optionally examples.',
+    'Get detailed documentation for a specific item. Returns signature, docs, feature gate, methods, trait impls, and optionally examples. Auto-discovers modulePath if omitted.',
     {
       crateName: z.string().describe('Crate name'),
       itemType: itemTypeEnum.describe('Item type'),
@@ -20,7 +20,7 @@ export function register(server: McpServer) {
       modulePath: z
         .string()
         .optional()
-        .describe('Dot-separated module path (e.g. "sync"). Omit if at crate root.'),
+        .describe('Dot-separated module path (e.g. "sync"). Auto-discovered if omitted.'),
       version: versionParam,
       includeExamples: z
         .boolean()
@@ -38,16 +38,58 @@ export function register(server: McpServer) {
     }) => {
       try {
         const ver = version ?? 'latest';
-        const prefix = modToUrlPrefix(modulePath);
+
+        // Auto-discover modulePath if not provided
+        let resolvedModulePath = modulePath;
+        if (resolvedModulePath === undefined) {
+          const hits = await searchAllItems(crateName, itemName, ver);
+          const match = hits.find((h) =>
+            h.bareName.toLowerCase() === itemName.toLowerCase() && h.type === itemType,
+          ) ?? hits.find((h) =>
+            h.bareName.toLowerCase() === itemName.toLowerCase(),
+          );
+
+          if (match) {
+            resolvedModulePath = match.modulePath || undefined;
+            console.log(`[auto-discovery] ${itemName} → ${match.name} (${match.type})`);
+          }
+        }
+
+        const prefix = modToUrlPrefix(resolvedModulePath);
         const page =
           itemType === 'mod'
             ? `${prefix}${itemName}/index.html`
             : `${prefix}${TYPE_FILE_PREFIX[itemType] ?? `${itemType}.`}${itemName}.html`;
 
         const url = docsUrl(crateName, page, ver);
-        const $ = await fetchDom(url);
+        let $;
+        try {
+          $ = await fetchDom(url);
+        } catch (fetchErr: unknown) {
+          // Fuzzy fallback: if exact fetch fails, search for similar names
+          const hits = await searchAllItems(crateName, itemName, ver);
+          const fuzzy = hits.filter((h) =>
+            h.bareName.toLowerCase().includes(itemName.toLowerCase()) ||
+            itemName.toLowerCase().includes(h.bareName.toLowerCase()),
+          );
 
-        const fullName = `${crateName}::${modToRustPrefix(modulePath)}${itemName}`;
+          if (fuzzy.length) {
+            const suggestions = fuzzy.slice(0, 10).map((h) =>
+              `  [${h.type}] ${crateName}::${h.name}`,
+            );
+            return textResult([
+              `Could not find ${itemType} "${itemName}" at the expected path.`,
+              '',
+              'Did you mean one of these?',
+              ...suggestions,
+              '',
+              'Tip: use search_crate to find the exact name and module path.',
+            ].join('\n'));
+          }
+          throw fetchErr;
+        }
+
+        const fullName = `${crateName}::${modToRustPrefix(resolvedModulePath)}${itemName}`;
 
         // Signature
         const decl = $('pre.rust.item-decl').text().trim();

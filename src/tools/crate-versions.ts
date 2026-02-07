@@ -1,7 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import axios from 'axios';
-import { CRATES_IO, USER_AGENT, textResult, errorResult, isStdCrate } from '../lib.js';
+import { CRATES_IO, fetchJson, textResult, errorResult, isStdCrate } from '../lib.js';
 import { cacheGet, cacheSet } from '../cache.js';
 
 interface VersionEntry {
@@ -9,6 +8,10 @@ interface VersionEntry {
   yanked: boolean;
   created_at: string;
   license: string;
+}
+
+interface VersionsResponse {
+  versions: Record<string, unknown>[];
 }
 
 export function register(server: McpServer) {
@@ -34,12 +37,9 @@ export function register(server: McpServer) {
           return textResult(cached);
         }
 
-        const { data } = await axios.get(`${CRATES_IO}/crates/${crateName}/versions`, {
-          headers: { 'User-Agent': USER_AGENT },
-          timeout: 10_000,
-        });
+        const data = await fetchJson<VersionsResponse>(`${CRATES_IO}/crates/${crateName}/versions`);
 
-        const versions: VersionEntry[] = (data.versions ?? []).map((v: Record<string, unknown>) => ({
+        const versions: VersionEntry[] = (data.versions ?? []).map((v) => ({
           num: v.num as string,
           yanked: v.yanked as boolean,
           created_at: v.created_at as string,

@@ -43,6 +43,7 @@ export function register(server: McpServer) {
         parts.push(`  crates.io: https://crates.io/crates/${info.name}`);
         parts.push(`  license: ${versionInfo.license}`);
         parts.push(`  downloads: ${info.downloads.toLocaleString()}`);
+        if (versionInfo.msrv) parts.push(`  msrv: ${versionInfo.msrv}`);
 
         // Features
         const { features, defaultFeatures } = versionInfo;

@@ -1,7 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import axios from 'axios';
-import { CRATES_IO, USER_AGENT, textResult, errorResult } from '../lib.js';
+import { CRATES_IO, fetchJson, textResult, errorResult } from '../lib.js';
 import { cacheGet, cacheSet } from '../cache.js';
 
 interface CrateSearchResult {
@@ -10,6 +9,11 @@ interface CrateSearchResult {
   downloads: number;
   max_stable_version: string | null;
   max_version: string;
+}
+
+interface CrateSearchResponse {
+  crates: CrateSearchResult[];
+  meta?: { total?: number };
 }
 
 export function register(server: McpServer) {
@@ -32,19 +36,19 @@ export function register(server: McpServer) {
           return textResult(cached);
         }
 
-        const { data } = await axios.get(`${CRATES_IO}/crates`, {
-          params: { q: query, per_page: perPage, page },
-          headers: { 'User-Agent': USER_AGENT },
-          timeout: 10_000,
+        const params = new URLSearchParams({
+          q: query,
+          per_page: String(perPage),
+          page: String(page),
         });
-
-        const crates: CrateSearchResult[] = data.crates ?? [];
+        const data = await fetchJson<CrateSearchResponse>(`${CRATES_IO}/crates?${params}`);
+        const crates = data.crates ?? [];
 
         if (!crates.length) {
           return textResult(`No crates found for "${query}".`);
         }
 
-        const total: number = data.meta?.total ?? crates.length;
+        const total = data.meta?.total ?? crates.length;
         const lines = crates.map((c) => {
           const ver = c.max_stable_version || c.max_version;
           const dl = c.downloads.toLocaleString();

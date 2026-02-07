@@ -9,7 +9,7 @@ import { itemTypeEnum, versionParam } from './shared.js';
 export function register(server: McpServer) {
   server.tool(
     'get_crate_items',
-    'List public items in a crate root or module. Returns names, types, feature gates, and short descriptions.',
+    'List public items in a crate root or module. Returns names, types, feature gates, and short descriptions. Supports filtering by item type and feature gate.',
     {
       crateName: z.string().describe('Crate name'),
       modulePath: z
@@ -19,10 +19,14 @@ export function register(server: McpServer) {
       itemType: itemTypeEnum
         .optional()
         .describe('Filter results to a single item type'),
+      feature: z
+        .string()
+        .optional()
+        .describe('Filter to items gated behind this feature (e.g. "sync", "fs")'),
       version: versionParam,
     },
-    async ({ crateName, modulePath, itemType, version }: {
-      crateName: string; modulePath?: string; itemType?: string; version?: string;
+    async ({ crateName, modulePath, itemType, feature, version }: {
+      crateName: string; modulePath?: string; itemType?: string; feature?: string; version?: string;
     }) => {
       try {
         const ver = version ?? 'latest';
@@ -43,6 +47,11 @@ export function register(server: McpServer) {
             const gate = $dt.find('.stab.portability code').first().text().trim();
             if (!name) return;
 
+            // Feature filter: skip items not behind the requested feature
+            if (feature) {
+              if (!gate || !gate.toLowerCase().includes(feature.toLowerCase())) return;
+            }
+
             const tag = gate ? ` [feature: ${gate}]` : '';
             lines.push(`[${type}] ${name}${tag} — ${desc}`);
           });
@@ -52,14 +61,17 @@ export function register(server: McpServer) {
           ? `${crateName}::${modulePath.replace(/\./g, '::')}`
           : crateName;
 
+        const filters: string[] = [];
+        if (itemType) filters.push(`type: ${itemType}`);
+        if (feature) filters.push(`feature: ${feature}`);
+        const filterLabel = filters.length ? ` (${filters.join(', ')})` : '';
+
         if (!lines.length) {
-          return textResult(
-            `No items found in ${label}${itemType ? ` (type: ${itemType})` : ''}.`,
-          );
+          return textResult(`No items found in ${label}${filterLabel}.`);
         }
 
         return textResult(
-          [`# Items in ${label}${itemType ? ` [${itemType}]` : ''}`, url, '', ...lines].join('\n'),
+          [`# Items in ${label}${filterLabel}`, url, '', ...lines].join('\n'),
         );
       } catch (e: unknown) {
         return errorResult(`Could not list items. ${(e as Error).message}`);
